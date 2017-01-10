@@ -42,9 +42,9 @@ public:
         const auto& filt = geometry.KernelShape();
         size_t mapCount = geometry.GetMapCount(geometry.InputShape().GetRank() - 1);
         if (mapCount != geometry.MapCount().GetNumElements())
-            InvalidArgument("cuDNN does not support map tensor of this configuration."); 
+            InvalidArgument("cuDNN does not support map tensor of this configuration.");
 
-        const size_t minDimSize = (size_t)4;    // minimum descriptor dim size is 4 for cuDNN 
+        const size_t minDimSize = (size_t)4;    // minimum descriptor dim size is 4 for cuDNN
         const size_t filt_size = filt.GetRank();
         size_t dim_size = std::max(filt_size + 1, minDimSize);
         SmallVector<int> dims(dim_size, 1);
@@ -86,20 +86,21 @@ public:
         // Set cuDNN convolution parameters. cuDNN uses row-major format while TensorShape - column-major
         // so conversion is required. Also, for 2D convolutions (which have 3D tensor shapes)
         // cuDNN uses 2D descriptors while for 3D convolutions - 3D so we need to ignore
-        // rightmost dimension in ConvolveGeometry tensors. 
+        // rightmost dimension in ConvolveGeometry tensors.
         const size_t minDimSize = (size_t)2;    // minimum stride and pad size 2 for cuDNN
         size_t stride_size = geometry.InputShape().GetRank() - 1;
         size_t dim_size = std::max(stride_size, minDimSize);
         SmallVector<int> stride(dim_size, 1);
         SmallVector<int> pad(dim_size, 0);
+        SmallVector<int> dilation(dim_size, 1);
         for (int i = 0; i < stride_size; i++)
         {
             stride[dim_size - 1 - i] = (int)geometry.GetStride(i);
             pad[dim_size - 1 - i] = geometry.GetLowerPad(i);
+            dilation[dim_size - 1 - i] = (int)geometry.GetDilation(i);
         }
-        SmallVector<int> upscale(dim_size, 1);
         CUDNN_CALL(cudnnSetConvolutionNdDescriptor(m_conv, (int)dim_size, pad.data(),
-                                                   stride.data(), upscale.data(),
+                                                   stride.data(), dilation.data(),
                                                    CUDNN_CROSS_CORRELATION, dataType));
     }
 
@@ -138,10 +139,10 @@ public:
         const size_t minDimSize = (size_t)2;    // minimum stride and pad size 2 for cuDNN
         size_t stride_size = geometry.InputShape().GetRank() - 1;
         size_t dim_size = std::max(stride_size, minDimSize);
-        SmallVector<int> dims(dim_size, 1); 
+        SmallVector<int> dims(dim_size, 1);
         SmallVector<int> stride(dim_size, 1);
         SmallVector<int> pad(dim_size, 0);
-        auto kernelShape = geometry.KernelShape(); 
+        auto kernelShape = geometry.KernelShape();
         for (int i = 0; i < stride_size; i++)
         {
             dims[dim_size - 1 - i] = (int)kernelShape[i];
@@ -151,7 +152,7 @@ public:
         cudnnPoolingMode_t poolMode = CUDNN_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING;
         if (poolIncludePad)
             poolMode = CUDNN_POOLING_AVERAGE_COUNT_INCLUDE_PADDING;
-        // deterministic maxpool is not working when kernel size > stride size in cuDNN. We ignore this flag for now. 
+        // deterministic maxpool is not working when kernel size > stride size in cuDNN. We ignore this flag for now.
         if (forceDeterministicAlgorithms) {}
         // Must use CUDNN_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING to get the same results as in reference engine.
         CUDNN_CALL(cudnnSetPoolingNdDescriptor(m_pool,
@@ -202,21 +203,21 @@ public:
           m_dataType(CuDnnTensor::GetDataType<ElemType>()),
           m_forceDeterministicAlgorithms(forceDeterministicAlgorithms)
     {
-        auto inShape = geometry->InputShape(); 
-        auto outShape = geometry->OutputShape(); 
+        auto inShape = geometry->InputShape();
+        auto outShape = geometry->OutputShape();
 
         const size_t minDimSize = (size_t)3;    // minimum input and output size are 3 for cuDNN
         size_t input_size = inShape.GetRank();
         size_t dim_size = std::max(input_size, minDimSize);
-        SmallVector<size_t> inputDims(dim_size, 1); 
+        SmallVector<size_t> inputDims(dim_size, 1);
         SmallVector<size_t> outputDims(dim_size, 1);
         for (int i = 0; i < input_size - 1; i++)
         {
             inputDims[dim_size - 1 - i] = inShape[input_size - 1 - i];
             outputDims[dim_size - 1 - i] = outShape[input_size - 1 - i];
         }
-        inputDims[0] = inShape[0]; 
-        outputDims[0] = outShape[0]; 
+        inputDims[0] = inShape[0];
+        outputDims[0] = outShape[0];
         m_inT.Set(TensorShape(inputDims), m_dataType);
         m_outT.Set(TensorShape(outputDims), m_dataType);
     }
@@ -263,19 +264,19 @@ protected:
                 return cudnnGetConvolutionForwardAlgorithm(*m_cudnn, m_inT, *m_kernelT, *m_conv, m_outT, CUDNN_CONVOLUTION_FWD_SPECIFY_WORKSPACE_LIMIT, workspace.BufferSize(), &algo);
             return cudnnGetConvolutionForwardAlgorithm(*m_cudnn, m_inT, *m_kernelT, *m_conv, m_outT, CUDNN_CONVOLUTION_FWD_NO_WORKSPACE, 0, &algo);
         };
-        // find deterministic algorithm 
+        // find deterministic algorithm
         auto deterministicFinder = [&, this](int& calgo, cudnnConvolutionFwdAlgoPerf_t algoPerf[MaxAlgoCount]) -> cudnnStatus_t
         {
-            auto result = finder(calgo, algoPerf); 
+            auto result = finder(calgo, algoPerf);
             auto found = std::find_if(algoPerf, algoPerf + calgo,
                 [](const cudnnConvolutionFwdAlgoPerf_t& a) { return a.algo == CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM && a.status == CUDNN_STATUS_SUCCESS; });
             if (found == algoPerf + calgo)
                 RuntimeError("cuDNN could not find a deterministic algorithm. Set 'forceDeterministicAlgorithms=false' in your configuration.");
-            algoPerf[0] = *found;   // copy the deterministic algorithm to first entry 
-            calgo = 1;              // set count of algorithms 
+            algoPerf[0] = *found;   // copy the deterministic algorithm to first entry
+            calgo = 1;              // set count of algorithms
             return result;
         };
-        // finde workspace size needed to auto-tune all algorithms, as well as the size needed for deterministic algorithm 
+        // finde workspace size needed to auto-tune all algorithms, as well as the size needed for deterministic algorithm
         auto workspaceSizeFinder = [&, this]() -> cudnnStatus_t
         {
             size_t tmpSize;
@@ -289,11 +290,11 @@ protected:
                         m_fwdAlgo.AlgoWorkspaceSize = tmpSize;
                     if ((cudnnConvolutionFwdAlgo_t)i == CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM)
                         m_fwdAlgo.DeterministicAlgoWorkspaceSize = tmpSize;
-                    err = err0; 
+                    err = err0;
                 }
             }
-            return err; 
-        }; 
+            return err;
+        };
         FindBestAlgo(batchSize, m_fwdAlgo, workspaceSizeFinder, deterministicFinder, finder, staticFinder, workspace);
         // Perform forward convolution operation.
         CUDNN_CALL(cudnnConvolutionForward(*m_cudnn, &C::One, m_inT, ptr(in), *m_kernelT, ptr(kernel), *m_conv, m_fwdAlgo.selectedAlgo, ptr(workspace), workspace.BufferSize(), &C::Zero, m_outT, ptr(out)));
@@ -309,7 +310,7 @@ protected:
             if (accumulateGradient)
             {
                 // cudnnFindConvolutionBackwardDataAlgorithmEx will overwrite the output buffer, thus we create a temporary buffer here
-                // note this memory allocation might fail, so use try...catch for safety 
+                // note this memory allocation might fail, so use try...catch for safety
                 auto gradReplace = Matrix<ElemType>((grad.BufferSize() + sizeof(ElemType) - 1)/sizeof(ElemType), 1, m_deviceId);
                 result = cudnnFindConvolutionBackwardDataAlgorithmEx(*m_cudnn, *m_kernelT, ptr(kernel), m_outT, ptr(srcGrad), *m_conv, m_inT, ptr(gradReplace), MaxAlgoCount, &calgo, algoPerf, ptr(workspace), workspace.BufferSize());
                 gradReplace.ReleaseMemory();
@@ -325,7 +326,7 @@ protected:
                 return cudnnGetConvolutionBackwardDataAlgorithm(*m_cudnn, *m_kernelT, m_outT, *m_conv, m_inT, CUDNN_CONVOLUTION_BWD_DATA_SPECIFY_WORKSPACE_LIMIT, workspace.BufferSize(), &algo);
             return cudnnGetConvolutionBackwardDataAlgorithm(*m_cudnn, *m_kernelT, m_outT, *m_conv, m_inT, CUDNN_CONVOLUTION_BWD_DATA_NO_WORKSPACE, 0, &algo);
         };
-        // find deterministic algorithm 
+        // find deterministic algorithm
         auto deterministicFinder = [&, this](int& calgo, cudnnConvolutionBwdDataAlgoPerf_t algoPerf[MaxAlgoCount]) -> cudnnStatus_t
         {
             auto result = finder(calgo, algoPerf);
@@ -333,11 +334,11 @@ protected:
                 [](const cudnnConvolutionBwdDataAlgoPerf_t& a) { return a.algo == CUDNN_CONVOLUTION_BWD_DATA_ALGO_1 && a.status == CUDNN_STATUS_SUCCESS; });
             if (found == algoPerf + calgo)
                 RuntimeError("cuDNN could not find a deterministic algorithm. Set 'forceDeterministicAlgorithms=false' in your configuration.");
-            algoPerf[0] = *found;   // copy the deterministic algorithm to first entry 
-            calgo = 1;              // set count of algorithms 
+            algoPerf[0] = *found;   // copy the deterministic algorithm to first entry
+            calgo = 1;              // set count of algorithms
             return result;
         };
-        // finde workspace size needed to auto-tune all algorithms, as well as the size needed for deterministic algorithm 
+        // finde workspace size needed to auto-tune all algorithms, as well as the size needed for deterministic algorithm
         auto workspaceSizeFinder = [&, this]() -> cudnnStatus_t
         {
             size_t tmpSize;
@@ -351,11 +352,11 @@ protected:
                         m_backDataAlgo.AlgoWorkspaceSize = tmpSize;
                     if ((cudnnConvolutionBwdDataAlgo_t)i == CUDNN_CONVOLUTION_BWD_DATA_ALGO_1)
                         m_backDataAlgo.DeterministicAlgoWorkspaceSize = tmpSize;
-                    err = err0; 
+                    err = err0;
                 }
             }
             return err;
-        }; 
+        };
         FindBestAlgo(batchSize, m_backDataAlgo, workspaceSizeFinder, deterministicFinder, finder, staticFinder, workspace);
         // Compute gradients with respect to the output tensor (data).
         CUDNN_CALL(cudnnConvolutionBackwardData(*m_cudnn, &C::One, *m_kernelT, ptr(kernel), m_outT, ptr(srcGrad), *m_conv, m_backDataAlgo.selectedAlgo, ptr(workspace), workspace.BufferSize(), accumulateGradient ? &C::One : &C::Zero, m_inT, ptr(grad)));
@@ -371,7 +372,7 @@ protected:
             if (accumulateGradient)
             {
                 // cudnnFindConvolutionBackwardFilterAlgorithmEx will overwrite the output buffer, thus we create a temporary buffer here
-                // note this memory allocation might fail, so use try...catch for safety 
+                // note this memory allocation might fail, so use try...catch for safety
                 auto kernelGradReplace = Matrix<ElemType>((kernelGrad.BufferSize() + sizeof(ElemType) - 1)/sizeof(ElemType), 1, m_deviceId);
                 result = cudnnFindConvolutionBackwardFilterAlgorithmEx(*m_cudnn, m_inT, ptr(in), m_outT, ptr(srcGrad), *m_conv, *m_kernelT, ptr(kernelGradReplace), MaxAlgoCount, &calgo, algoPerf, ptr(workspace), workspace.BufferSize());
                 kernelGradReplace.ReleaseMemory();
@@ -387,19 +388,19 @@ protected:
                 return cudnnGetConvolutionBackwardFilterAlgorithm(*m_cudnn, m_inT, m_outT, *m_conv, *m_kernelT, CUDNN_CONVOLUTION_BWD_FILTER_SPECIFY_WORKSPACE_LIMIT, workspace.BufferSize(), &algo);
             return cudnnGetConvolutionBackwardFilterAlgorithm(*m_cudnn, m_inT, m_outT, *m_conv, *m_kernelT, CUDNN_CONVOLUTION_BWD_FILTER_NO_WORKSPACE, 0, &algo);
         };
-        // find deterministic algorithm 
+        // find deterministic algorithm
         auto deterministicFinder = [&, this](int& calgo, cudnnConvolutionBwdFilterAlgoPerf_t algoPerf[MaxAlgoCount])->cudnnStatus_t
         {
-            auto result = finder(calgo, algoPerf); 
+            auto result = finder(calgo, algoPerf);
             auto found = std::find_if(algoPerf, algoPerf + calgo,
                 [](const cudnnConvolutionBwdFilterAlgoPerf_t& a) { return a.algo == CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1 && a.status == CUDNN_STATUS_SUCCESS; });
             if (found == algoPerf + calgo)
                 RuntimeError("cuDNN could not find a deterministic algorithm. Set 'forceDeterministicAlgorithms=false' in your configuration.");
-            algoPerf[0] = *found;   // copy the deterministic algorithm to first entry 
-            calgo = 1;              // set count of algorithms 
+            algoPerf[0] = *found;   // copy the deterministic algorithm to first entry
+            calgo = 1;              // set count of algorithms
             return result;
         };
-        // finde workspace size needed to auto-tune all algorithms, as well as the size needed for deterministic algorithm 
+        // finde workspace size needed to auto-tune all algorithms, as well as the size needed for deterministic algorithm
         auto workspaceSizeFinder = [&, this]() -> cudnnStatus_t
         {
             size_t tmpSize;
@@ -413,11 +414,11 @@ protected:
                         m_backFiltAlgo.AlgoWorkspaceSize = tmpSize;
                     if ((cudnnConvolutionBwdFilterAlgo_t)i == CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1)
                         m_backFiltAlgo.DeterministicAlgoWorkspaceSize = tmpSize;
-                    err = err0; 
+                    err = err0;
                 }
             }
             return err;
-        }; 
+        };
         FindBestAlgo(batchSize, m_backFiltAlgo, workspaceSizeFinder, deterministicFinder, finder, staticFinder, workspace);
         // Compute gradients with respect to the output tensor (data).
         CUDNN_CALL(cudnnConvolutionBackwardFilter(*m_cudnn, &C::One, m_inT, ptr(in), m_outT, ptr(srcGrad), *m_conv, m_backFiltAlgo.selectedAlgo, ptr(workspace), workspace.BufferSize(), accumulateGradient ? &C::One : &C::Zero, *m_kernelT, ptr(kernelGrad)));
@@ -482,27 +483,27 @@ private:
             workspace.Resize(0,0,0,false);
             algo.AlgoWorkspaceSize = 0;
             algo.MBSizeForCurrentWorkspace = 0;
-        } 
+        }
         else if (algo.autotuningState == AutotuningState::Running && !m_forceDeterministicAlgorithms)  // batchSize changes to be smaller than MBSizeForCurrentWorkspace, need to re-do tuning if non-deterministic
             algo.autotuningState = AutotuningState::PendingTuning;
 
         typename TAlgo::typeT algoPerf[MaxAlgoCount];
         int calgo = 0;
         // in initState, where memory allocation for nodes are not completed, we only run the algorithm with no workspace
-        // or in the special case when m_forceDeterministicAlgorithms, we allocate some memory and use the deterministic algorithm 
+        // or in the special case when m_forceDeterministicAlgorithms, we allocate some memory and use the deterministic algorithm
         if (algo.autotuningState == AutotuningState::Init)
         {
-            // find workspace size needed for finderEx and deterministic algorithm 
-            CUDNN_CALL(workspaceSizeFinder()); 
+            // find workspace size needed for finderEx and deterministic algorithm
+            CUDNN_CALL(workspaceSizeFinder());
             if (m_forceDeterministicAlgorithms)
             {
                 workspace.Resize((algo.DeterministicAlgoWorkspaceSize + sizeof(ElemType) - 1) / sizeof(ElemType), 1, 0, false);
                 CUDNN_CALL(deterministicFinder(calgo, algoPerf));
-                assert(calgo == 1);                                 // only one deterministic algorithm will be returned 
+                assert(calgo == 1);                                 // only one deterministic algorithm will be returned
                 algo.MBSizeForCurrentAlgo = batchSize;
-                algo.selectedAlgo = (*algoPerf).algo;               // deterministic algorithm is the first in the list  
+                algo.selectedAlgo = (*algoPerf).algo;               // deterministic algorithm is the first in the list
                 algo.maxAlgo = algo.selectedAlgo;
-                algo.autotuningState = AutotuningState::Running;    // no further need for tuning since this is deterministic, directly enter running state 
+                algo.autotuningState = AutotuningState::Running;    // no further need for tuning since this is deterministic, directly enter running state
                 algo.AlgoWorkspaceSize = (*algoPerf).memory;
             }
             else
@@ -532,18 +533,18 @@ private:
                 // We reserve 2% of the total GPU memory because CuDNN seem to behave erroneously when there is no memory left
                 if(free > (total/50))
                     resizeTo = free - (total/50) + sizeof(ElemType);
-                // We don't need memory more than workspace we learned in workspaceSizeFinder 
-                resizeTo = min(resizeTo, algo.AlgoWorkspaceSize); 
-                resizeTo = min(resizeTo, maxMem); 
+                // We don't need memory more than workspace we learned in workspaceSizeFinder
+                resizeTo = min(resizeTo, algo.AlgoWorkspaceSize);
+                resizeTo = min(resizeTo, maxMem);
                 if(resizeTo > 0)
                     workspace.Resize((resizeTo + sizeof(ElemType) - 1) / sizeof(ElemType), 1);     // resize the workspace so that we can run the finder
                 algo.MBSizeForCurrentWorkspace = batchSize;
 
                 // Pending State now, let's do a find and get algorithm Perfs
-                calgo = 0; 
+                calgo = 0;
                 CUDNN_CALL(finder(calgo, algoPerf));
-                assert(calgo > 0); 
-                auto res = algoPerf;        // first returned algorithm is the fastest 
+                assert(calgo > 0);
+                auto res = algoPerf;        // first returned algorithm is the fastest
                 algo.MBSizeForCurrentAlgo = batchSize;
                 algo.selectedAlgo = (*res).algo;
                 algo.maxAlgo = algo.selectedAlgo;
@@ -553,24 +554,24 @@ private:
                     workspace.Resize((curSize + sizeof(ElemType) - 1) / sizeof(ElemType), 1, 0, false);
                 else
                     workspace.Resize((algo.AlgoWorkspaceSize + sizeof(ElemType) - 1) / sizeof(ElemType), 1, 0, false);
-            } 
-            catch (...) 
+            }
+            catch (...)
             {   // when it fails, it means accumulate is on, and allocation of temporary buffer failed. We resize to curSize and try again
-                fprintf(stderr, "Retrying with reduced workspace memory for convolution\n"); 
+                fprintf(stderr, "Retrying with reduced workspace memory for convolution\n");
                 workspace.Resize((curSize + sizeof(ElemType) - 1) / sizeof(ElemType), 1, 0, false);
                 try
                 {
                     calgo = 0;
                     CUDNN_CALL(finder(calgo, algoPerf));
                     assert(calgo > 0);
-                    auto res = algoPerf;    // first returned algorithm is the fastest 
+                    auto res = algoPerf;    // first returned algorithm is the fastest
                     algo.MBSizeForCurrentAlgo = batchSize;
                     algo.selectedAlgo = (*res).algo;
                     algo.maxAlgo = algo.selectedAlgo;
                     algo.autotuningState = AutotuningState::Running;
                     algo.AlgoWorkspaceSize = (*res).memory;
-                } 
-                catch (...) 
+                }
+                catch (...)
                 {   // fails again, let's fall back to cudnnGet
                     fprintf(stderr, "Fall back to use static finder to get the algorithm for convolution\n");
                     CUDNN_CALL(staticFinder(algo.selectedAlgo, false));
@@ -615,14 +616,14 @@ private:
         {
         }
         // Current mini-batch size, needed for re-computing statistics in auto-tuner.
-        size_t maxMBSizeSeen;               // maximum minibatch size that's seen for the current tuning. If batch size exceed this number, redo tuning from scratch  
+        size_t maxMBSizeSeen;               // maximum minibatch size that's seen for the current tuning. If batch size exceed this number, redo tuning from scratch
         size_t MBSizeForCurrentAlgo;        // minibatch size for the currently adopted algorithm
-        size_t MBSizeForCurrentWorkspace;   // minibatch size when the current work space is allocated, if bath size returns to this size, directly pick the maxAlgo 
-        size_t AlgoWorkspaceSize;           // maximum workspace size for any algorithm 
-        size_t DeterministicAlgoWorkspaceSize;  // workspace size for deterministic algorithm 
-        AutotuningState autotuningState;    // state of auto-tuning: Init, PendingTuning and Running 
-        decltype(T::algo) selectedAlgo;     // currently selected algorithm 
-        decltype(T::algo) maxAlgo;          // algorithm that was selected when the current workspace is allocated 
+        size_t MBSizeForCurrentWorkspace;   // minibatch size when the current work space is allocated, if bath size returns to this size, directly pick the maxAlgo
+        size_t AlgoWorkspaceSize;           // maximum workspace size for any algorithm
+        size_t DeterministicAlgoWorkspaceSize;  // workspace size for deterministic algorithm
+        AutotuningState autotuningState;    // state of auto-tuning: Init, PendingTuning and Running
+        decltype(T::algo) selectedAlgo;     // currently selected algorithm
+        decltype(T::algo) maxAlgo;          // algorithm that was selected when the current workspace is allocated
 
         bool NeedAutotuning(size_t batchSize)
         {
@@ -693,14 +694,14 @@ bool CuDnnConvolutionEngineFactory<ElemType>::IsSupported(DEVICEID_TYPE deviceId
 
     // cuDNN as of version 6.0 does not handle asymmetric padding for even size kernel convolution correctly. We need to detect asymmetric
     // padding due to auto-padding and choose the reference convolution implementation instead
-    // a special case is when stride >= input, this means we will have a single output, and thus asymmetric padding is not an issue 
+    // a special case is when stride >= input, this means we will have a single output, and thus asymmetric padding is not an issue
     if (poolKind == PoolKind::None)     // only for convolution, pooling seems fine
     {
         for (int i = 0; i < kernelRank; i++)
         {
-            auto lowerPad = geometry->GetLowerPad(i); 
-            auto upperPad = geometry->GetUpperPad(i); 
-            auto stride = geometry->GetStride(i); 
+            auto lowerPad = geometry->GetLowerPad(i);
+            auto upperPad = geometry->GetUpperPad(i);
+            auto stride = geometry->GetStride(i);
             if (kernel[i] % 2 == 0 && lowerPad < upperPad && stride < input[i])
             {
                 fprintf(stderr, "WARNING: Detected asymmetric padding issue with even kernel size and lowerPad (%d) < higherPad (%d) (i=%d), cuDNN will not be able to produce correct result. Switch to reference engine (VERY SLOW). \n", lowerPad, upperPad, i);
