@@ -1,9 +1,11 @@
 import numpy as np
-from cntk import cntk_py, utils
+from cntk import cntk_py, NDArrayView
+from cntk.device import DeviceDescriptor
 from ..tensor import TensorOpsMixin
-from ..utils import typemap, sanitize_precision, sanitize_value, sanitize_dtype_cntk, _create_NDArrayView_from_NumPy
+from ..utils import typemap, sanitize_precision, sanitize_value, \
+        sanitize_shape, sanitize_dtype_cntk
 
-class VariableMixin:
+class VariableMixin(object):
     '''
     Standard properties for :class:`Variable` and its derived classes
     :class:`Parameter` and :class:`Constant`.
@@ -121,14 +123,34 @@ class Variable(VariableMixin, TensorOpsMixin, cntk_py.Variable):
     '''
     def __init__(self, shape=None, dtype=None, needs_gradient=False, is_sparse=False,
                  dynamic_axes=[cntk_py.Axis.default_dynamic_axis(), cntk_py.Axis.default_batch_axis()], name=''):
-        shape = utils.sanitize_shape(shape)
+        shape = sanitize_shape(shape)
 
         if dtype is None:
             dtype = np.float32
-        dtype = utils.sanitize_dtype_cntk(dtype)
+        dtype = sanitize_dtype_cntk(dtype)
 
         super(Variable, self).__init__(shape, is_sparse, dtype, needs_gradient, name,
                          dynamic_axes)
+
+    @typemap
+    def as_parameter(self):
+        '''
+        Converts this instance into a :class:`Parameter`
+        '''
+        if not self.is_parameter:
+            raise TypeError('cannot be converted into a Parameter')
+
+        return cntk_py.Parameter(self)
+
+    @typemap
+    def as_constant(self):
+        '''
+        Converts this instance into a :class:`Constant`
+        '''
+        if not self.is_constant:
+            raise TypeError('cannot be converted into a Constant')
+
+        return cntk_py.Constant(self)
 
 
 class Parameter(VariableMixin, TensorOpsMixin, cntk_py.Parameter):
@@ -166,8 +188,8 @@ class Parameter(VariableMixin, TensorOpsMixin, cntk_py.Parameter):
             ndav = sanitize_value(shape, init, dtype, device)
             super(Parameter, self).__init__(ndav, name)
         else:
-            shape = utils.sanitize_shape(shape)
-            cntk_dtype = utils.sanitize_dtype_cntk(dtype)
+            shape = sanitize_shape(shape)
+            cntk_dtype = sanitize_dtype_cntk(dtype)
             super(Parameter, self).__init__(shape, cntk_dtype, init,
                     device, name)
 
@@ -181,10 +203,10 @@ class Parameter(VariableMixin, TensorOpsMixin, cntk_py.Parameter):
     @value.setter
     def value(self, val):
         if isinstance(val, np.ndarray):
-            ndarray = _create_NDArrayView_from_NumPy(val.astype(self.dtype))
-            super().set_value(ndarray)
+            ndarray = NDArrayView.from_dense(val.astype(self.dtype))
+            super(Parameter, self).set_value(ndarray)
         elif isinstance(val, cntk_py.NDArrayView):
-            super().set_value(val)
+            super(Parameter, self).set_value(val)
         else:
             raise TypeError("Unsupported value type: %s", type(val))
 
@@ -211,8 +233,12 @@ class Constant(VariableMixin, TensorOpsMixin, cntk_py.Constant):
             else:
                 dtype = np.float32
 
+        if device is None:
+            device = DeviceDescriptor.use_default_device()
+
         if np.isscalar(value):
-            super(Constant, self).__init__(utils.sanitize_shape(shape), sanitize_dtype_cntk(dtype), value)
+            super(Constant, self).__init__(sanitize_shape(shape),
+                    sanitize_dtype_cntk(dtype), value, device, name)
         else:
             ndav = sanitize_value(shape, value, dtype, device)
             super(Constant, self).__init__(ndav, name)

@@ -4,6 +4,7 @@
 # for full license information.
 # ==============================================================================
 
+from __future__ import print_function
 import numpy as np
 import sys
 import os
@@ -38,11 +39,11 @@ def convnet_mnist(debug_output=False):
     scaled_input = cntk.ops.element_times(cntk.ops.constant(0.00390625), input_var)
 
     with cntk.layers.default_options(activation=cntk.ops.relu, pad=False): 
-        conv1 = cntk.layers.Convolution((5,5), 32, pad=True)(scaled_input)
+        conv1 = cntk.layers.Convolution2D((5,5), 32, pad=True)(scaled_input)
         pool1 = cntk.layers.MaxPooling((3,3), (2,2))(conv1)
-        conv2 = cntk.layers.Convolution((3,3), 48)(pool1)
+        conv2 = cntk.layers.Convolution2D((3,3), 48)(pool1)
         pool2 = cntk.layers.MaxPooling((3,3), (2,2))(conv2)
-        conv3 = cntk.layers.Convolution((3,3), 64)(pool2)
+        conv3 = cntk.layers.Convolution2D((3,3), 64)(pool2)
         f4    = cntk.layers.Dense(96)(conv3)
         drop4 = cntk.layers.Dropout(0.5)(f4)
         z     = cntk.layers.Dense(num_output_classes, activation=None)(drop4)
@@ -64,7 +65,7 @@ def convnet_mnist(debug_output=False):
 
     # Instantiate the trainer object to drive the model training
     learner = cntk.learner.momentum_sgd(z.parameters, lr_schedule, mm_schedule)
-    trainer = cntk.Trainer(z, ce, pe, learner)
+    trainer = cntk.Trainer(z, (ce, pe), learner)
 
     # define mapping from reader streams to network inputs
     input_map = {
@@ -86,7 +87,7 @@ def convnet_mnist(debug_output=False):
             progress_printer.update_with_trainer(trainer, with_metric=True) # log progress
 
         progress_printer.epoch_summary(with_metric=True)
-        z.save_model(os.path.join(model_path, "ConvNet_MNIST_{}.dnn".format(epoch)))
+        z.save(os.path.join(model_path, "ConvNet_MNIST_{}.dnn".format(epoch)))
     
     # Load test data
     reader_test = create_reader(os.path.join(data_path, 'Test-28x28_cntk_text.txt'), False, input_dim, num_output_classes)
@@ -117,7 +118,7 @@ def convnet_mnist(debug_output=False):
         metric_denom += current_minibatch
 
         # Keep track of the number of samples processed so far.
-        sample_count += trainer.previous_minibatch_sample_count
+        sample_count += data[label_var].num_samples
         minibatch_index += 1
 
     print("")
