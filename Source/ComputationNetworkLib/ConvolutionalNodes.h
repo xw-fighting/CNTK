@@ -310,6 +310,8 @@ public:
         : Base(deviceId, name, kernelShape, mapCount, strideShape, sharing, autoPadding, lowerPad, upperPad, PoolKind::None, false, transpose, outputShape, false, imageLayout, maxTempMemSizeInSamples),
         m_convolution2D(false), m_dilation(dilation)
     {
+        // Make sure not using dilation on CPU
+        if(deviceId<0) for(int i=0;i<dilation.size();i++) if(1!=dilation[i]) RuntimeError("Dilated convolution on CPU is not yet implemented.");
     }
     ConvolutionNode(DEVICEID_TYPE deviceId, const wstring& name, const size_t kernelWidth, const size_t kernelHeight, const size_t outputChannels,
                     const size_t horizontalSubsample, const size_t verticalSubsample, ImageLayoutKind imageLayout,

@@ -54,6 +54,7 @@ namespace CNTK
     /*static*/ const std::wstring PrimitiveFunction::AttributeNameInferInputRankToMap = L"inferInputRankToMap";
     /*static*/ const std::wstring PrimitiveFunction::AttributeNameOffset = L"offset";
     /*static*/ const std::wstring PrimitiveFunction::AttributeNameStrides = L"strides";
+    /*static*/ const std::wstring PrimitiveFunction::AttributeNameDilation = L"dilation";
     /*static*/ const std::wstring PrimitiveFunction::AttributeNameSharing = L"sharing";
     /*static*/ const std::wstring PrimitiveFunction::AttributeNameAutoPadding = L"autoPadding";
     /*static*/ const std::wstring PrimitiveFunction::AttributeNameLowerPad = L"lowerPad";
@@ -665,7 +666,7 @@ namespace CNTK
                                 m_attributes[PrimitiveFunction::AttributeNamePoolingWindowShape] = poolingWindowsShape;
                             }
 
-                            outputShape = ConvolutionOpOutputShape(m_op, inputShape, poolingWindowsShape, outputMapCount, strides, sharing, autoPadding, lowerPad, upperPad, false, true, ceilOutDim);
+                            outputShape = ConvolutionOpOutputShape(m_op, inputShape, poolingWindowsShape, outputMapCount, strides, sharing, autoPadding, lowerPad, upperPad, false, true, NDShape({1}), ceilOutDim);
                             break;
                         }
                         case PrimitiveOpType::Unpooling:
@@ -793,6 +794,7 @@ namespace CNTK
                         {
                             assert(m_inputs.size() == 2);
                             auto& strides = m_attributes[PrimitiveFunction::AttributeNameStrides].Value<NDShape>();
+                            auto& dilation = m_attributes[PrimitiveFunction::AttributeNameDilation].Value<NDShape>();
                             auto& lowerPad = m_attributes[PrimitiveFunction::AttributeNameLowerPad].Value<NDShape>();
                             auto& upperPad = m_attributes[PrimitiveFunction::AttributeNameUpperPad].Value<NDShape>();
                             NDShape tmpShape = NDShape::Unknown();
@@ -814,10 +816,10 @@ namespace CNTK
                                 LogicError("Function '%S': Currently convolution does not support operands with free static axes dimensions.", AsString().c_str());
 
                             if (!transpose || tmpShape.IsUnknown() || tmpShape[0] == 0)
-                                outputShape = ConvolutionOpOutputShape(m_op, inputShape, kernelShape, outputMapCount, strides, sharing, autoPadding, lowerPad, upperPad, transpose, true);
+                                outputShape = ConvolutionOpOutputShape(m_op, inputShape, kernelShape, outputMapCount, strides, sharing, autoPadding, lowerPad, upperPad, transpose, true, dilation);
                             else
                             {
-                                NDShape inferredInputShape = ConvolutionOpOutputShape(m_op, tmpShape, kernelShape, outputMapCount, strides, sharing, autoPadding, lowerPad, upperPad, false, true);
+                                NDShape inferredInputShape = ConvolutionOpOutputShape(m_op, tmpShape, kernelShape, outputMapCount, strides, sharing, autoPadding, lowerPad, upperPad, false, true, dilation);
                                 if (inferredInputShape != inputShape)
                                 {
                                     RuntimeError("Convolution transpose: The shape '%S' of the convolution transpose operand '%S' is different than the resulting shape '%S' from convolving the "
@@ -1340,8 +1342,8 @@ namespace CNTK
     }
 
     /*static*/ NDShape PrimitiveFunction::ConvolutionOpOutputShape(PrimitiveOpType op, const NDShape& operandShape, NDShape& kernelShape, NDShape& outputMapCount, NDShape& strides,
-        std::vector<bool>& sharing, std::vector<bool>& autoPad, NDShape& lowerPad, NDShape& upperPad,
-        bool transpose, bool inferDimensions, bool ceilOutputDim/* = false*/)
+                                                                   std::vector<bool>& sharing, std::vector<bool>& autoPad, NDShape& lowerPad, NDShape& upperPad,
+                                                                   bool transpose, bool inferDimensions, NDShape dilation/* = NDShape({1})*/, bool ceilOutputDim/* = false*/)
     {
         if (inferDimensions)
         {
@@ -1373,6 +1375,7 @@ namespace CNTK
             size_t fillRank = (!transpose) ? filterRank : filterRank - 1;
             FixNDShape(fillRank, inputRank, kernelShape, 1, fromShape); // convolve over red dim; pool over 1
             FixNDShape(fillRank, inputRank, strides, 1, fromShape); // stride for reduction dims is red dim or 1
+            FixNDShape(fillRank, inputRank, dilation, 1, fromShape);
             FixNDShape(fillRank, inputRank, lowerPad, 0);
             FixNDShape(fillRank, inputRank, upperPad, 0);
             Microsoft::MSR::CNTK::ConvolutionNodeBase<float>::FixVectorShape(fillRank, inputRank, sharing, true);
@@ -1385,7 +1388,7 @@ namespace CNTK
         else
             computeOutputShapeFunc = &Microsoft::MSR::CNTK::ConvolveGeometry::ComputeInputShape;
 
-        auto outputShape = AsNDShape(computeOutputShapeFunc(AsTensorShape(operandShape), AsTensorShape(kernelShape), AsTensorShape(outputMapCount), AsTensorShape(strides), sharing, autoPad, AsTensorShape(lowerPad), AsTensorShape(upperPad), Microsoft::MSR::CNTK::TensorShape(1), ceilOutputDim));
+        auto outputShape = AsNDShape(computeOutputShapeFunc(AsTensorShape(operandShape), AsTensorShape(kernelShape), AsTensorShape(outputMapCount), AsTensorShape(strides), sharing, autoPad, AsTensorShape(lowerPad), AsTensorShape(upperPad), AsTensorShape(dilation), ceilOutputDim));
 
         // Any input dimensions that are free/inferred pass through as free/inferred
         for (size_t i = 0; i < operandShape.Rank(); ++i)
