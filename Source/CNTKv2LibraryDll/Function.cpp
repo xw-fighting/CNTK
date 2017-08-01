@@ -1129,7 +1129,8 @@ namespace CNTK
         {
             auto operandPlaceholder = PlaceholderVariable();
             auto operandDelta = operandPlaceholder - ReduceMax(operandPlaceholder, axis);
-            auto result = ElementDivide(Exp(operandDelta), ReduceSum(Exp(operandDelta), axis));
+            auto expOperandDelta = Exp(operandDelta);
+            auto result = ElementDivide(expOperandDelta, ReduceSum(expOperandDelta, axis));
 
             return AsBlock(std::move(result), { { operandPlaceholder, operand } }, L"Softmax", name);
         }
@@ -1451,6 +1452,39 @@ namespace CNTK
     {
         std::vector<Variable> operands = { prediction, targets, weights };
         return AsComposite(MakeSharedObject<PrimitiveFunction>(PrimitiveOpType::Logistic, operands, Dictionary(), name), name);
+    }
+
+    CNTK_API FunctionPtr NCELoss(const Variable& weights, const Variable& biases, const Variable& inputs, const Variable& labels, const Constant& noiseDistribution, size_t numSamples, bool allowDuplicates, unsigned long seed, const std::wstring & name)
+    {
+        auto inputsPlaceholder = PlaceholderVariable(L"inputs");
+        auto labelsPlaceholder = PlaceholderVariable(L"labels");
+
+        auto k = Constant::Scalar((float)numSamples);
+        auto kq = ElementTimes(k, noiseDistribution, L"kq");
+        auto logkq = Log(kq, L"logkq");
+        auto hkq = ReduceSum(ElementTimes(kq, logkq), Axis::AllStaticAxes(), L"Hkq");
+        auto inclusionProbability = RandomSampleInclusionFrequency(noiseDistribution, numSamples, allowDuplicates, seed, L"incProb");
+        auto importanceWeights = ElementDivide(noiseDistribution, inclusionProbability);
+        auto combinedFunction = Combine({ hkq, logkq, importanceWeights });
+        auto outputs = combinedFunction->Outputs();
+        auto outputMap = std::unordered_map<Variable, ValuePtr>{ { outputs[0], nullptr},{ outputs[1], nullptr },{ outputs[2], nullptr } };
+        combinedFunction->Forward({}, outputMap, noiseDistribution.Value()->Device(), {}, {});
+        auto kNoiseEntropy = Constant(outputMap.at(outputs[0])->Data());
+        auto logkNoise = Constant(outputMap.at(outputs[1])->Data());
+        auto importances = Constant(outputMap.at(outputs[2])->Data());
+
+        auto SNegative = RandomSample(noiseDistribution, numSamples, allowDuplicates);
+        auto hatq = TransposeTimes(SNegative, importances);
+        auto logitsNegative = TransposeTimes(Times(weights, SNegative), inputsPlaceholder) + Reshape(Times(biases, SNegative), { NDShape::InferredDimension });
+        auto logitsPositive = ReduceSum(ElementTimes(inputsPlaceholder, Times(weights, labelsPlaceholder)), Axis::AllStaticAxes()) + Reshape(Times(biases, labelsPlaceholder), { NDShape::InferredDimension });
+        auto lossNegative = Minus(ElementTimes(k,ReduceSum(ElementTimes(importances, LogAddExp(logitsNegative, logitsNegative)), Axis::AllStaticAxes())), kNoiseEntropy);
+        //                                                                                               TODO: ^^^^ update
+        auto lossPositive = Minus(LogAddExp(logitsPositive, logitsPositive), logitsPositive);
+        //                   TODO: update                   ^^^^
+        auto nce = lossPositive + lossNegative;
+
+        return AsBlock(nce, { { inputsPlaceholder, inputs }, { labelsPlaceholder, labels} }, L"NCE", name);
+
     }
 
     FunctionPtr LambdaRank(const Variable& prediction, const Variable& gains, const Variable& groupId, const std::wstring& name)

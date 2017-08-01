@@ -1224,6 +1224,7 @@ struct ITakesDynamicAxis
 // =======================================================================
 // Nodes that have multiple outputs must derive from this.
 // =======================================================================
+// nikosk-nce
 template <typename ElemType>
 struct MultiOutputNode
 {
