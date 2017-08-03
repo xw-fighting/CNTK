@@ -1463,25 +1463,29 @@ namespace CNTK
         auto unnormalizedNoisePrior = ElementTimes(nSamples, noiseDistribution);
         auto logUnnormalizedNoisePrior = Log(unnormalizedNoisePrior);
         auto unormalizedNoisePriorEntropy = ReduceSum(ElementTimes(unnormalizedNoisePrior, logUnnormalizedNoisePrior), Axis::AllStaticAxes());
-        auto inclusionProbability = RandomSampleInclusionFrequency(noiseDistribution, numSamples, allowDuplicates, seed, L"incProb");
+        auto inclusionProbability = RandomSampleInclusionFrequency(noiseDistribution, numSamples, allowDuplicates, seed);
         auto importanceWeights = ElementDivide(noiseDistribution, inclusionProbability);
         auto reshapedLogNoisePrior = Reshape(logUnnormalizedNoisePrior, NDShape{ { 1, NDShape::InferredDimension } });
         auto combinedFunction = Combine({ unormalizedNoisePriorEntropy, reshapedLogNoisePrior, importanceWeights });
         auto outputs = combinedFunction->Outputs();
         auto outputMap = std::unordered_map<Variable, ValuePtr>{ { outputs[0], nullptr},{ outputs[1], nullptr },{ outputs[2], nullptr } };
         combinedFunction->Forward({}, outputMap, noiseDistribution.Value()->Device(), {}, {});
-        auto noisePriorEntropy = Constant(outputMap.at(outputs[0])->Data());
-        auto logNoisePrior = Constant(outputMap.at(outputs[1])->Data());
-        auto importances = Constant(outputMap.at(outputs[2])->Data());
+        auto noisePriorEntropy = Constant(outputMap.at(outputs[0])->Data(), L"noisePriorEntropy");
+        auto logNoisePrior = Constant(outputMap.at(outputs[1])->Data(), L"logNoisePrior");
+        auto importances = Constant(outputMap.at(outputs[2])->Data(), L"importanceWeights");
 
         auto inferredVectorShape = NDShape{ {NDShape::InferredDimension} };
-        auto negativeSamples = RandomSample(noiseDistribution, numSamples, allowDuplicates);
-        auto selectedImportanceWeights = TransposeTimes(negativeSamples, importances);
-        auto logitsOfNegatives = TransposeTimes(Times(weights, negativeSamples), inputsPlaceholder) + Reshape(Times(biases, negativeSamples), inferredVectorShape);
-        auto logitsOfPositives = ReduceSum(ElementTimes(inputsPlaceholder, Times(weights, labelsPlaceholder)), Axis::AllStaticAxes()) + Reshape(Times(biases, labelsPlaceholder), {});
+        auto negativeSamples = RandomSample(noiseDistribution, numSamples, allowDuplicates, seed, L"negativeSamples");
+        auto selectedImportanceWeights = TransposeTimes(negativeSamples, importances, L"sampledImportanceWeights");
+        auto negativeWeights = Times(weights, negativeSamples, L"negativeWeights");
+        auto negativeBiases = Times(biases, negativeSamples, L"negativeBiases");
+        auto logitsOfNegatives = Plus(TransposeTimes(negativeWeights, inputsPlaceholder), Reshape(negativeBiases, inferredVectorShape), L"negativeLogits");
+        auto positiveWeights = Times(weights, labelsPlaceholder, L"positiveWeights");
+        auto positiveBiases = Times(biases, labelsPlaceholder, L"positiveBiases");
+        auto logitsOfPositives = Plus(ReduceSum(ElementTimes(inputsPlaceholder, positiveWeights), Axis::AllStaticAxes()), Reshape(positiveBiases, {}), L"positiveLogits");
         
         auto lossOnNegatives = Minus(ElementTimes(nSamples, ReduceSum(ElementTimes(selectedImportanceWeights, LogAddExp(logitsOfNegatives, Reshape(Times(logNoisePrior, negativeSamples), inferredVectorShape))), Axis::AllStaticAxes())), noisePriorEntropy);
-        auto lossOnPositives = Minus(LogAddExp(logitsOfPositives, Reshape(Times(logNoisePrior, labelsPlaceholder), {})), logitsOfPositives);
+        auto lossOnPositives = Minus(LogAddExp(logitsOfPositives, Reshape(Times(logNoisePrior, labelsPlaceholder), {})), logitsOfPositives, L"lossOnPositives");
         auto loss = lossOnPositives + lossOnNegatives;
 
         return AsBlock(std::move(loss), { { inputsPlaceholder, inputs }, { labelsPlaceholder, labels} }, L"NCE", name);

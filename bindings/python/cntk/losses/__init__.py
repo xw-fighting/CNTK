@@ -14,6 +14,7 @@ from ..ops.functions import CloneMethod, Function
 from ..variables import Variable, Parameter, Constant
 from cntk.internal import sanitize_input, sanitize_shape, sanitize_axis, sanitize_dynamic_axes, typemap
 from cntk.internal.utils import get_data_type
+from cntk.cntk_py import sentinel_value_for_auto_select_random_seed as auto_select
 from ..axis import Axis
 
 
@@ -261,3 +262,29 @@ def lambda_rank(output, gain, group, name=''):
     gain = sanitize_input(gain, dtype)
     group = sanitize_input(group, dtype)
     return lambda_rank(output, gain, group, name)
+
+
+@typemap
+def nce_loss(weights, biases, inputs, labels, noise_distribution, num_samples=32, allow_duplicates=True, seed=auto_select, name=''):
+    r'''nce_loss(weights, biases, inputs, labels, noise_distribution, num_samples=32, allow_duplicates=True, seed=auto_select, name='')
+
+
+
+    In the backward direction it back-propagates LambdaRank gradients.
+
+    Example:
+
+    Args:
+        output: score of each sample
+        gain: gain of each sample
+        group: group of each sample
+        name (str, optional): the name of the Function instance in the network
+    Returns:
+        :class:`~cntk.ops.functions.Function`
+    '''
+    from cntk.cntk_py import nceloss
+    dtype = get_data_type(inputs, labels, noise_distribution)
+    inputs = sanitize_input(inputs, dtype)
+    labels = sanitize_input(labels, dtype)
+    noise_distribution = sanitize_input(noise_distribution, dtype)
+    return nceloss(weights, biases, inputs, labels, noise_distribution, num_samples, allow_duplicates, seed, name)
