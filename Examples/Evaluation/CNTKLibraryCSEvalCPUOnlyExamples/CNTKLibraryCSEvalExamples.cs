@@ -35,7 +35,7 @@ namespace CNTKLibraryCSEvalExamples
                 Console.WriteLine("\n===== Evaluate single image =====");
 
                 // Load the model.
-                // The model resnet20.dnn is trained by <CNTK>/Examples/Image/Classification/ResNet/Python/Models/TrainResNet_CIFAR10.py
+                // The model resnet20.dnn is trained by <CNTK>/Examples/Image/Classification/ResNet/Python/TrainResNet_CIFAR10.py
                 // Please see README.md in <CNTK>/Examples/Image/Classification/ResNet about how to train the model.
                 string modelFilePath = "resnet20.dnn";
                 ThrowIfFileNotExist(modelFilePath, string.Format("Error: The model '{0}' does not exist. Please follow instructions in README.md in <CNTK>/Examples/Image/Classification/ResNet to create the model.", modelFilePath));
@@ -119,7 +119,7 @@ namespace CNTKLibraryCSEvalExamples
                 ThrowIfFileNotExist(modelFilePath, string.Format("Error: The model '{0}' does not exist. Please follow instructions in README.md in <CNTK>/Examples/Image/Classification/ResNet to create the model.", modelFilePath));
 
                 // Load the model.
-                // The model resnet20.dnn is trained by <CNTK>/Examples/Image/Classification/ResNet/Python/Models/TrainResNet_CIFAR10.py
+                // The model resnet20.dnn is trained by <CNTK>/Examples/Image/Classification/ResNet/Python/TrainResNet_CIFAR10.py
                 // Please see README.md in <CNTK>/Examples/Image/Classification/ResNet about how to train the model.
                 Function modelFunc = Function.Load(modelFilePath, device);
 
@@ -204,7 +204,7 @@ namespace CNTKLibraryCSEvalExamples
             BlockingCollection<Function> Models = new BlockingCollection<Function>();
 
             // Load and clone the model.
-            // The model resnet20.dnn is trained by <CNTK>/Examples/Image/Classification/ResNet/Python/Models/TrainResNet_CIFAR10.py
+            // The model resnet20.dnn is trained by <CNTK>/Examples/Image/Classification/ResNet/Python/TrainResNet_CIFAR10.py
             // Please see README.md in <CNTK>/Examples/Image/Classification/ResNet about how to train the model.
             var rootFunc = Function.Load(modelFilePath, device);
             Models.Add(rootFunc);
@@ -286,7 +286,7 @@ namespace CNTKLibraryCSEvalExamples
                 Console.WriteLine("\n===== Load model from memory buffer =====");
 
                 // For demo purpose, we first read the the model into memory
-                // The model resnet20.dnn is trained by <CNTK>/Examples/Image/Classification/ResNet/Python/Models/TrainResNet_CIFAR10.py
+                // The model resnet20.dnn is trained by <CNTK>/Examples/Image/Classification/ResNet/Python/TrainResNet_CIFAR10.py
                 // Please see README.md in <CNTK>/Examples/Image/Classification/ResNet about how to train the model.
                 string modelFilePath = "resnet20.dnn";
                 ThrowIfFileNotExist(modelFilePath, string.Format("Error: The model '{0}' does not exist. Please follow instructions in README.md in <CNTK>/Examples/Image/Classification/ResNet to create the model.", modelFilePath));
