@@ -1454,28 +1454,86 @@ namespace CNTK
         return AsComposite(MakeSharedObject<PrimitiveFunction>(PrimitiveOpType::Logistic, operands, Dictionary(), name), name);
     }
 
-    CNTK_API FunctionPtr NCELoss(const Variable& weights, const Variable& biases, const Variable& inputs, const Variable& labels, const Constant& noiseDistribution, size_t numSamples, bool allowDuplicates, unsigned long seed, const std::wstring& name)
+    CNTK_API FunctionPtr NCELoss(const Variable& weights, const Variable& biases, const Variable& inputs, const Variable& labels, const Constant& noiseWeights, size_t numSamples, bool allowDuplicates, unsigned long seed, const std::wstring& name)
     {
         auto inputsPlaceholder = PlaceholderVariable(L"inputs");
         auto labelsPlaceholder = PlaceholderVariable(L"labels");
+        
+        auto noiseWeightsShape = noiseWeights.Shape();
+        if (noiseWeightsShape.Rank() != 1)
+            InvalidArgument("NCELoss: noiseWeights must be a vector");
+
+        auto numClasses = noiseWeightsShape[0];
+
+        if (!weights.IsPlaceholder())
+        {
+            auto weightsShape = weights.Shape();
+            if (weightsShape.Rank() != 2)
+                InvalidArgument("NCELoss: weights must have two axes");
+            if (weightsShape[1] != numClasses)
+                InvalidArgument("NCELoss: the second axis of weights is of length %zd but it is expected to be the same length as the noiseWeights %zd", weightsShape[1], numClasses);
+        }
+
+        if (!biases.IsPlaceholder())
+        {
+            auto biasesShape = biases.Shape();
+            if (biasesShape.Rank() != 2)
+                InvalidArgument("NCELoss: biases must have two axes");
+            if (biasesShape[0] != 1)
+                InvalidArgument("NCELoss: the first axis of biases is of length %zd but it is expected to be of length 1", biasesShape[0]);
+            if (biasesShape[1] != numClasses)
+                InvalidArgument("NCELoss: the first axis of biases is of length %zd but it is expected to be the same length as the noiseWeights %zd", biasesShape[1], numClasses);
+        }
+
+        //auto zero = Plus(Constant::Scalar(0.0f), Constant::Scalar(0.0f));
+
+        if (!inputs.IsPlaceholder())
+        {
+            auto inputsShape = inputs.Shape();
+            if (inputsShape.Rank() != 1)
+                InvalidArgument("NCELoss: inputs must be a vector");
+            if (!weights.IsPlaceholder())
+            {
+                auto weightsShape = weights.Shape();
+                if (weightsShape[0] == NDShape::InferredDimension)
+                    //Create a function that will result in performing the correct inference
+                    auto zero = TransposeTimes(weights, inputs);
+                else if (weightsShape[0] != inputsShape[0])
+                    InvalidArgument("NCELoss: the second axis of weights is of length %zd but it is expected to be the same length as the inputs %zd", weightsShape[0], inputsShape[0]);
+            }
+        }
+
+        if (!labels.IsPlaceholder())
+        {
+            auto labelsShape = labels.Shape();
+            if (labelsShape.Rank() != 1)
+                InvalidArgument("NCELoss: labels must be a vector");
+            if (labelsShape[0] != numClasses)
+                InvalidArgument("NCELoss: the shape of the label (%zd) does not agree with the shape of noiseWeights (%zd)", labelsShape[0], numClasses);
+            if (!labels.IsSparse())
+                Warning("NCELoss: label is not sparse; gradients will be dense and operations will be slow");
+        }
 
         auto nSamples = Constant::Scalar((float)numSamples);
+        auto noiseDistribution = ElementDivide(noiseWeights, ReduceSum(noiseWeights, Axis::AllStaticAxes()));
         auto unnormalizedNoisePrior = ElementTimes(nSamples, noiseDistribution);
         auto logUnnormalizedNoisePrior = Log(unnormalizedNoisePrior);
         auto unormalizedNoisePriorEntropy = ReduceSum(ElementTimes(unnormalizedNoisePrior, logUnnormalizedNoisePrior), Axis::AllStaticAxes());
         auto inclusionProbability = RandomSampleInclusionFrequency(noiseDistribution, numSamples, allowDuplicates, seed);
         auto importanceWeights = ElementDivide(noiseDistribution, inclusionProbability);
         auto reshapedLogNoisePrior = Reshape(logUnnormalizedNoisePrior, NDShape{ { 1, NDShape::InferredDimension } });
-        auto combinedFunction = Combine({ unormalizedNoisePriorEntropy, reshapedLogNoisePrior, importanceWeights });
+        auto combinedFunction = Combine({ unormalizedNoisePriorEntropy, reshapedLogNoisePrior, importanceWeights, noiseDistribution });
         auto outputs = combinedFunction->Outputs();
-        auto outputMap = std::unordered_map<Variable, ValuePtr>{ { outputs[0], nullptr},{ outputs[1], nullptr },{ outputs[2], nullptr } };
-        combinedFunction->Forward({}, outputMap, noiseDistribution.Value()->Device(), {}, {});
+        auto outputMap = std::unordered_map<Variable, ValuePtr>{ { outputs[0], nullptr}, { outputs[1], nullptr }, { outputs[2], nullptr }, { outputs[3], nullptr } };
+        combinedFunction->Forward({}, outputMap, noiseWeights.Value()->Device(), {}, {});
         auto noisePriorEntropy = Constant(outputMap.at(outputs[0])->Data(), L"noisePriorEntropy");
         auto logNoisePrior = Constant(outputMap.at(outputs[1])->Data(), L"logNoisePrior");
         auto importances = Constant(outputMap.at(outputs[2])->Data(), L"importanceWeights");
+        auto noise = Constant(outputMap.at(outputs[3])->Data(), L"noise");
+
 
         auto inferredVectorShape = NDShape{ {NDShape::InferredDimension} };
-        auto negativeSamples = RandomSample(noiseDistribution, numSamples, allowDuplicates, seed, L"negativeSamples");
+        auto negativeSamples = RandomSample(noise, numSamples, allowDuplicates, seed, L"negativeSamples");
         auto selectedImportanceWeights = TransposeTimes(negativeSamples, importances, L"sampledImportanceWeights");
         auto negativeWeights = Times(weights, negativeSamples, L"negativeWeights");
         auto negativeBiases = Times(biases, negativeSamples, L"negativeBiases");
