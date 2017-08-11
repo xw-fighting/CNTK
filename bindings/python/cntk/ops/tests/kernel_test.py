@@ -564,6 +564,9 @@ DILATED_CONVOLUTION_DATA = [
 ]
 @pytest.mark.parametrize("input_size, conv_size, result", DILATED_CONVOLUTION_DATA)
 def test_convolution_dilated(input_size, conv_size, result, device_id, precision):
+    if device_id == -1:
+        pytest.skip('Test only runs on GPU')
+
     dt = PRECISION_TO_TYPE[precision]
     dev = cntk_device(device_id)
 
