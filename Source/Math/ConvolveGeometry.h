@@ -491,6 +491,7 @@ public:
                                          const BoolVec& sharing, const BoolVec& autoPad, const TensorShape& lowerPad, const TensorShape& upperPad, const TensorShape& dilation=TensorShape(1), bool ceilOutDim = false)
     {
         UNUSED(ceilOutDim);
+        UNUSED(dilation);
         if (outputShape.GetRank() != kernelShape.GetRank())
             InvalidArgument("Convolution output and kernel tensors must have the same rank.");
         if (mapCount.GetRank() != 1 && outputShape.GetRank() != mapCount.GetRank())
