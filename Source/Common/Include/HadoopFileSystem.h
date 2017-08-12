@@ -14,14 +14,17 @@ namespace Microsoft { namespace MSR { namespace CNTK {
 
 class hdfs_File {
 private:
-    std::wstring m_filename;
+#ifdef USE_HDFS
     hdfsFS m_fs;         // hadoop filesystem handle
     hdfsFile m_file;     // file handler
+#endif
+    wstring m_filename;
     bool m_seekable;     // this stream is seekable
     int m_options;       // FileOptions ored togther
 
 public:
-    hdfs_File(const std::string& filename, int fileOptions);
+    hdfs_File(const wstring filename, int fileOptions);
+
     ~hdfs_File();
 
     void Flush();
@@ -32,8 +35,9 @@ public:
     void SetPosition(uint64_t pos);
 
     void GetLine(std::string& str);
-    void GetLines(std::vector<std::wstring>& lines);
-    void GetLines(std::vector<std::string>& lines);
+
+    template <typename String>
+    void GetLines(std::vector<String>& lines);
 
     // static helpers
     // test whether a file exists
@@ -43,10 +47,6 @@ public:
     // make intermediate directories
     template<class String>
     static void MakeIntermediateDirs(const String& filename);
-
-    // determine the directory and naked file name for a given pathname
-    static std::wstring DirectoryPathOf(std::wstring path);
-    static std::wstring FileNameOf(std::wstring path);
 
     // put operator for basic types
     template <typename T>
@@ -143,9 +143,7 @@ public:
         }
         return *this;
     }
-
-    operator hdfs_File*() const { return this; }
-
+    
     template <class ElemType>
     static std::vector<ElemType> LoadMatrixFromTextFile(const std::wstring& filePath, size_t& /*out*/ numRows, size_t& /*out*/ numCols);
 
