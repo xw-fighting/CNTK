@@ -266,25 +266,60 @@ def lambda_rank(output, gain, group, name=''):
 
 @typemap
 def nce_loss(weights, biases, inputs, labels, noise_distribution, num_samples=32, allow_duplicates=True, seed=auto_select, name=''):
-    r'''nce_loss(weights, biases, inputs, labels, noise_distribution, num_samples=32, allow_duplicates=True, seed=auto_select, name='')
+    '''nce_loss(weights, biases, inputs, labels, noise_distribution, num_samples=32, allow_duplicates=True, seed=auto_select, name='')
+    Computes the noise contrastive estimation loss. This implementation mostly 
+    follows Chris Dyer's notes [1]. At a high level, this layer draws 
+    `num_samples` random labels from `noise_distribution` and then forms 
+    `num_samples`+1 binary classification problems where the true label is 
+    considered a positive example and the random labels are considered negative
+    examples. The negatives are shared among all the examples in the 
+    minibatch. This operation only computes the logits for the labels in the 
+    minibatch and the random labels drawn from `noise_distribution`. The 
+    gradients will be sparse if the labels are sparse.
 
-
-
-    In the backward direction it back-propagates LambdaRank gradients.
+    The `noise_distribution` is read once and certain quantities are 
+    precomputed based on it. This operation will need to be reinstantiated if 
+    the `noise_distribution` changes.
+    
+    Shape inference for the weights is currently not supported when inputs are 
+    placeholders. Either use a concrete input or provide weights without any 
+    inferred dimensions.
 
     Example:
 
     Args:
-        output: score of each sample
-        gain: gain of each sample
-        group: group of each sample
+        weights: parameter (or variable in general) containing the weights with 
+         which inputs will be multiplied. Its shape must be 
+         (number of classes, dimension of input)
+        biases: parameter (or variable in general) containing the biases that 
+         will be added to the product of weights and inputs. Its shape must be
+         (number of classes, 1)
+        inputs: vector of inputs to this layer. Multiplying by the weights and 
+         adding the biases gives the logits.
+        labels: a one-hot vector with the ground-truth labels.
+        noise_distribution: a constant vector with dimension equal to the number
+         of classes. The entries must be positive numbers but do not have to 
+         sum to 1. random labels will be drawn according to the normalized 
+         distribution.
+        num_samples: number of random labels that will be drawn from the 
+         `noise_distribution`.
+        allow_duplicates: boolean. If True (default), the random labels can 
+         contain duplicates. Compared to `allow_duplicates=False` it is faster 
+         but the quality of the approximations is slightly worse for the same 
+         number of samples.
+        seed: random seed. The default value selects a unique random seed.
         name (str, optional): the name of the Function instance in the network
     Returns:
         :class:`~cntk.ops.functions.Function`
+    
+    See also:
+        [1] C. Dyer. `Notes on Noise Contrastive Estimation and Negative 
+         Sampling [pdf] <http://demo.clab.cs.cmu.edu/cdyer/nce_notes.pdf>`_.
     '''
-    from cntk.cntk_py import nceloss
+    from cntk.cntk_py import nce_loss
     dtype = get_data_type(inputs, labels, noise_distribution)
     inputs = sanitize_input(inputs, dtype)
     labels = sanitize_input(labels, dtype)
     noise_distribution = sanitize_input(noise_distribution, dtype)
-    return nceloss(weights, biases, inputs, labels, noise_distribution, num_samples, allow_duplicates, seed, name)
+    return nce_loss(weights, biases, inputs, labels, noise_distribution, 
+                    num_samples, allow_duplicates, seed, name)

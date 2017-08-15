@@ -1485,8 +1485,6 @@ namespace CNTK
                 InvalidArgument("NCELoss: the first axis of biases is of length %zd but it is expected to be the same length as the noiseWeights %zd", biasesShape[1], numClasses);
         }
 
-        //auto zero = Plus(Constant::Scalar(0.0f), Constant::Scalar(0.0f));
-
         if (!inputs.IsPlaceholder())
         {
             auto inputsShape = inputs.Shape();
