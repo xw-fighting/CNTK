@@ -1496,8 +1496,16 @@ namespace CNTK
             {
                 auto weightsShape = weights.Shape();
                 if (weightsShape[0] == NDShape::InferredDimension)
+                {
                     //Create a function that will result in performing the correct inference
-                    auto zero = TransposeTimes(weights, inputs);
+                    //First make the right shape for a constant by starting with a {1} and appending the input shape
+                    //You'd think that AppendShape appends in place but you'd be wrong.
+                    auto constShape = NDShape({ 1 }).AppendShape(inputsShape);
+                    //Next make a constant. The exact datatype does not matter as we will not call forward on the resulting function.
+                    auto allZero = Constant(constShape, 0.0f);
+                    //Finally make a function we will not use. This will infer the right shape for the weights.
+                    auto unused = Times(allZero, weights);
+                }
                 else if (weightsShape[0] != inputsShape[0])
                     InvalidArgument("NCELoss: the second axis of weights is of length %zd but it is expected to be the same length as the inputs %zd", weightsShape[0], inputsShape[0]);
             }
