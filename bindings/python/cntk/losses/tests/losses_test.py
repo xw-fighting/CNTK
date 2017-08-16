@@ -160,3 +160,41 @@ def test_lambda_rank(grad, value, output, gain, device_id, precision):
 
     assert np.allclose(actual_value, expected_value)
     assert np.allclose(actual_grad,  expected_grad)
+
+
+NCE_EXPECTED_VALUES = [
+    # (classes, xdim, batch, expected_value)
+    (100,     50,  2, [ 3.52544 ,  5.671973]),
+    (1000,   100,  4, [ 1.949046,  2.219169,  2.426618,  3.094275]),
+    (10000,  200,  6, [ 1.494069,  1.569222,  1.628346,  1.64969 ,  1.673538,  1.755621]),
+]
+
+@pytest.mark.parametrize("classes, xdim, batch, expected_value", NCE_EXPECTED_VALUES)
+def test_nce_loss(classes, xdim, batch, expected_value, device_id, precision):
+    dt = PRECISION_TO_TYPE[precision]
+
+    from cntk.losses import nce_loss
+    import scipy
+
+    x = C.input_variable(xdim, needs_gradient=True)
+    y = C.input_variable(classes, is_sparse=True)
+
+    x0 = np.arange(batch * xdim, dtype=np.float32).reshape((batch, xdim))/(batch * xdim)
+    data = np.ones(batch, dtype=np.float32)
+    indices = list(range(10,10*batch+1,10))
+    indptr = list(range(batch+1))
+    y0 = scipy.sparse.csr_matrix((data, indices, indptr), shape=(batch, classes))
+
+    q = np.arange(classes, dtype=np.float32) + 1
+
+    b = C.parameter((classes, 1), init=-np.log(classes))
+    W = C.parameter((classes, C.InferredDimension), init=C.glorot_uniform(seed=98052))
+
+    loss = C.nce_loss(W, b, x, y, q, seed=98052)
+    v = loss.grad({x:x0, y:y0}, wrt=loss.parameters, as_numpy=False)
+    for key in v:
+        assert v[key].is_sparse, "gradient of nce_loss with respect to %s is not sparse"%key
+    losses = np.zeros((100,batch))
+    for i in range(100):
+        losses[i,:] = loss.eval({x:x0, y:y0})
+    assert np.allclose(np.mean(losses, axis=0), AA(expected_value))
