@@ -1106,7 +1106,6 @@ namespace CNTK
 
             auto primaryOutput = OutputVariable(outputShape, outputDataType, outputDynamicAxes, needsGradient, Name().empty() ? L"" : Name());
             outputs.push_back(primaryOutput);
-            // nikosk-nce
             if (m_op == PrimitiveOpType::UnpackSequence)
             {
                 auto suppressMaskOutput = m_attributes[PrimitiveFunction::AttributeNameSequenceUnpackSuppressMaskOutput].Value<bool>();
