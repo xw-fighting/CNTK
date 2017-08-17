@@ -475,6 +475,9 @@ private:
             algo.autotuningState = AutotuningState::Init;
 
         // batchSize is bigger than the one when initialize current workspace, need free up space and go back to init
+        // we also reset auto tuning when workspace size is smaller than required by the algorithm
+        // This is due to a bug in memory sharing on workspaces that does not handle different sequence axes separately
+        // which may leads to shared workspaces resized in one conv node affecting another conv node
         if (algo.autotuningState == AutotuningState::Running &&
             (batchSize > algo.MaxMBSizeSeen ||
              algo.AlgoRequiredWorkspaceSize > workspace.BufferSize()))
