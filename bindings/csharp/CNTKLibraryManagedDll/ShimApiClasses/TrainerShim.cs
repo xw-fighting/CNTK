@@ -25,5 +25,11 @@ namespace CNTK
             UnorderedMapVariableMinibatchData vectorData = Helper.AsUnorderedMapVariableMinibatchData(arguments);
             return TrainMinibatch(vectorData, computeDevice);
         }
+
+        public bool TrainMinibatch(IDictionary<Variable, Value> arguments, DeviceDescriptor computeDevice)
+        {
+            UnorderedMapVariableValuePtr mapData = Helper.AsUnorderedMapVariableValue(arguments);
+            return TrainMinibatch(mapData, computeDevice);
+        }
     }
 }

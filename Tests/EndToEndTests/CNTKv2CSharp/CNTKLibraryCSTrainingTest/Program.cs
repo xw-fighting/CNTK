@@ -26,6 +26,9 @@ namespace CNTK.CNTKLibraryCSTrainingTest
                 var device = DeviceDescriptor.CPUDevice;
 
                 SimpleFeedForwardClassifierTest.TrainSimpleFeedForwardClassifier(device);
+                MNISTClassifierTest.TrainMNISTClassifier(device, false);
+                LSTMSequenceClassifierTest.TrainLSTMSequenceClassifier(device, false, false);
+                TransferLearning.TrainAndEvaluateTransferLearning(device);
             }
 
             if (ShouldRunOnGpu())
@@ -34,6 +37,10 @@ namespace CNTK.CNTKLibraryCSTrainingTest
                 var device = DeviceDescriptor.GPUDevice(0);
 
                 SimpleFeedForwardClassifierTest.TrainSimpleFeedForwardClassifier(device);
+                MNISTClassifierTest.TrainMNISTClassifier(device, false);
+                LSTMSequenceClassifierTest.TrainLSTMSequenceClassifier(device, false, false);
+                TransferLearning.TrainAndEvaluateTransferLearning(device);
+                CifarResNetTest.TrainResNetCifarClassifier(device, false);
             }
 
             Console.WriteLine("======== Train completes. ========");

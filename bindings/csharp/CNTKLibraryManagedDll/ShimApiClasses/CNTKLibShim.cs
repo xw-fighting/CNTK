@@ -4,23 +4,34 @@
 //
 // CNTKLibShim.cs -- General C# Api methods
 //
+using System;
 using System.Collections.Generic;
 
 namespace CNTK
 {
     public partial class CNTKLib
     {
-        /// <summary>
-        /// Create an instance of the CNTK built-in SGD learner.
-        /// </summary>
-        /// <param name="parameters">Parameters of the learner.</param>
-        /// <param name="learningRateSchedule">Learning rate schedule.</param>
-        /// <param name="additionalOptions">Additional options.</param>
-        /// <returns></returns>
-        public static Learner SGDLearner(IList<Parameter> parameters, TrainingParameterScheduleDouble learningRateSchedule, AdditionalLearningOptions additionalOptions)
+        public static CNTKDictionary ReaderCrop(string cropType, Tuple<int, int> cropSize, Tuple<float, float> sideRatio,
+            Tuple<float, float> areaRatio, Tuple<float, float> aspectRatio, string jitterType)
         {
-            ParameterVector parameterVector = Helper.AsParameterVector(parameters);
-            return SGDLearner(parameterVector, learningRateSchedule, additionalOptions);
+            PairIntInt cropSizeSwig = new PairIntInt(cropSize.Item1, cropSize.Item2);
+            PairFloatFloat sideRatioSwig = new PairFloatFloat(sideRatio.Item1, sideRatio.Item2);
+            PairFloatFloat areaRatioSwig = new PairFloatFloat(areaRatio.Item1, areaRatio.Item2);
+            PairFloatFloat aspectRatioSwig = new PairFloatFloat(aspectRatio.Item1, aspectRatio.Item2);
+            return ReaderCrop(cropType, cropSizeSwig, sideRatioSwig, areaRatioSwig, aspectRatioSwig, jitterType);
+        }
+
+        public static CNTKDictionary ImageDeserializer(string fileName, string labelStreamName, uint numLabels, string imageStreamName, IList<CNTKDictionary> deserializers)
+        {
+            DictionaryVector deserializersSwig = Helper.AsDictionaryVector(deserializers);
+            return ImageDeserializer(fileName, labelStreamName, numLabels, imageStreamName, deserializersSwig);
+        }
+
+        public static Function Convolution(Variable convolutionMap, Variable operand, NDShape strides, IEnumerable<bool> sharing, IEnumerable<bool> autoPadding)
+        {
+            BoolVector sharingVec = Helper.AsBoolVector(sharing);
+            BoolVector autoPaddingVec = Helper.AsBoolVector(autoPadding);
+            return CNTKLib.Convolution(convolutionMap, operand, strides, sharingVec, autoPaddingVec);
         }
     }
 }
