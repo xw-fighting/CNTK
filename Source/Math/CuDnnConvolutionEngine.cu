@@ -475,7 +475,9 @@ private:
             algo.autotuningState = AutotuningState::Init;
 
         // batchSize is bigger than the one when initialize current workspace, need free up space and go back to init
-        if (algo.autotuningState == AutotuningState::Running && batchSize > algo.MaxMBSizeSeen)
+        if (algo.autotuningState == AutotuningState::Running &&
+            (batchSize > algo.MaxMBSizeSeen ||
+             algo.AlgoRequiredWorkspaceSize > workspace.BufferSize()))
         {
             algo.autotuningState = AutotuningState::Init;
             cudaDeviceSynchronize(); // make sure no in-flight GPU kernels using workspace before release its memory
@@ -517,7 +519,7 @@ private:
         }
 
         // we allocate workspace and find algorithm if batchSize is higher than ever seen
-        if (algo.AlgoInUseWorkspaceSize == 0 || algo.AlgoRequiredWorkspaceSize > workspace.BufferSize()) // no workspace memory has been allocated for this node, or not enough workspace
+        if (algo.AlgoInUseWorkspaceSize == 0) // no workspace memory has been allocated for this node, or not enough workspace
         {
             size_t curSize = workspace.BufferSize();
 
