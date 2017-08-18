@@ -482,10 +482,9 @@ private:
             (batchSize > algo.MaxMBSizeSeen ||
              algo.AlgoRequiredWorkspaceSize > workspace.BufferSize()))
         {
-            algo.autotuningState = AutotuningState::Init;
+            algo.Reset();
             cudaDeviceSynchronize(); // make sure no in-flight GPU kernels using workspace before release its memory
             workspace.Resize(0,0,0,false);
-            algo.RecordBatchSizeAndWorkspaceSize(0, /*newAlgo*/true, 0);
         } 
         else if (algo.autotuningState == AutotuningState::Running && !m_forceDeterministicAlgorithms)  // batchSize changes to be smaller than MBSizeForCurrentWorkspace, need to re-do tuning if non-deterministic
             algo.autotuningState = AutotuningState::PendingTuning;
@@ -506,7 +505,7 @@ private:
                 algo.selectedAlgo = (*algoPerf).algo;               // deterministic algorithm is the first in the list  
                 algo.maxAlgo = algo.selectedAlgo;
                 algo.autotuningState = AutotuningState::Running;    // no further need for tuning since this is deterministic, directly enter running state 
-                algo.RecordBatchSizeAndWorkspaceSize(batchSize, /*newAlgo*/true, (*algoPerf).memory);
+                algo.RecordBatchSizeAndWorkspaceSize(batchSize, (*algoPerf).memory);
             }
             else
             {
@@ -515,14 +514,17 @@ private:
                 // this is the only place we skip the check for workspace size because the workspace allocation is pending
                 CUDNN_CALL(staticFinder(algo.selectedAlgo, /*noMem*/true));
                 algo.autotuningState = AutotuningState::PendingTuning;
-                algo.RecordBatchSizeAndWorkspaceSize(batchSize, /*newAlgo*/false, 0, /*skipWorkspaceSizeCheck*/true);
+                algo.RecordBatchSizeAndWorkspaceSize(batchSize, 0, /*skipWorkspaceSizeCheck*/true);
             }
             algo.MaxMBSizeSeen = batchSize;
             return;
         }
 
-        // we allocate workspace and find algorithm if batchSize is higher than ever seen
-        if (algo.AlgoInUseWorkspaceSize == 0) // no workspace memory has been allocated for this node, or not enough workspace
+        if (algo.autotuningState != AutotuningState::PendingTuning)
+            LogicError("Unexpected state");
+
+        // we allocate workspace and find algorithm if current workspace is not big enough
+        if (algo.AlgoInUseWorkspaceSize < algo.AlgoRequiredWorkspaceSize)
         {
             size_t curSize = workspace.BufferSize();
 
@@ -541,8 +543,12 @@ private:
                 // We don't need memory more than workspace we learned in workspaceSizeFinder 
                 resizeTo = min(resizeTo, algo.AlgoRequiredWorkspaceSize); 
                 resizeTo = min(resizeTo, maxMem); 
-                if(resizeTo > 0)
+                if(resizeTo > curSize)
                     workspace.Resize((resizeTo + sizeof(ElemType) - 1) / sizeof(ElemType), 1);     // resize the workspace so that we can run the finder
+
+                // now we are searching for algorithms and no long need to remember workspace size for search itself
+                // this reset to zero for AlgoRequiredWorkspaceSize is necessary as finder only remembers the max workspace size
+                algo.AlgoRequiredWorkspaceSize = 0;
 
                 // Pending State now, let's do a find and get algorithm Perfs
                 calgo = 0; 
@@ -553,11 +559,9 @@ private:
                 algo.selectedAlgo = (*res).algo;
                 algo.maxAlgo = algo.selectedAlgo;
                 algo.autotuningState = AutotuningState::Running;
-                algo.RecordBatchSizeAndWorkspaceSize(batchSize, /*newAlgo*/true, (*res).memory);
-                if (algo.AlgoRequiredWorkspaceSize < curSize)   // need to shrink the workspace
-                    workspace.Resize((curSize + sizeof(ElemType) - 1) / sizeof(ElemType), 1, 0, false);
-                else
-                    workspace.Resize((algo.AlgoRequiredWorkspaceSize + sizeof(ElemType) - 1) / sizeof(ElemType), 1, 0, false);
+                if (algo.AlgoRequiredWorkspaceSize > workspace.BufferSize())
+                    LogicError("CudnnConvolutionEngine::FindBestAlgo: Internal error, algorithm requires more memory than existing workspace");
+                algo.RecordBatchSizeAndWorkspaceSize(batchSize, workspace.BufferSize());
             } 
             catch (...) 
             {   // when it fails, it means accumulate is on, and allocation of temporary buffer failed. We resize to curSize and try again
@@ -572,7 +576,7 @@ private:
                     algo.selectedAlgo = (*res).algo;
                     algo.maxAlgo = algo.selectedAlgo;
                     algo.autotuningState = AutotuningState::Running;
-                    algo.RecordBatchSizeAndWorkspaceSize(batchSize, /*newAlgo*/true, (*res).memory);
+                    algo.RecordBatchSizeAndWorkspaceSize(batchSize, curSize);
                 } 
                 catch (...) 
                 {   // fails again, let's fall back to cudnnGet
@@ -580,21 +584,28 @@ private:
                     CUDNN_CALL(staticFinder(algo.selectedAlgo, /*noMem*/false));
                     algo.maxAlgo = algo.selectedAlgo;
                     algo.autotuningState = AutotuningState::Running;
-                    algo.RecordBatchSizeAndWorkspaceSize(batchSize, /*newAlgo*/true, curSize);
+                    algo.RecordBatchSizeAndWorkspaceSize(batchSize, curSize);
                 }
             }
         }
-        else if (batchSize == algo.MBSizeForCurrentWorkspace) // Use stored algo when batchsize go back to max. Likely happen when last batch in epoch lacking data
+        else
         {
-            algo.selectedAlgo = algo.maxAlgo;
-            algo.autotuningState = AutotuningState::Running;
-            algo.RecordBatchSizeAndWorkspaceSize(batchSize, /*newAlgo*/false, algo.AlgoRequiredWorkspaceSize);
-        }
-        else    // use fast/static method to get algorithm when batchsize get smaller, assuming workspace size doesn't expand. Avoid severe slowdown when batchsize change frequently
-        {
-            CUDNN_CALL(staticFinder(algo.selectedAlgo, /*noMem*/false));
-            algo.autotuningState = AutotuningState::Running;
-            algo.RecordBatchSizeAndWorkspaceSize(batchSize, /*newAlgo*/false, workspace.BufferSize());
+            // fast route to select different algorithm when minibatch size changes, assuming workspace is big enough and no need to reallocate
+            if (algo.AlgoRequiredWorkspaceSize > workspace.BufferSize())
+                LogicError("CuDnnConvolutionEngine::FindBestAlgo internal error: workspace not big enough");
+
+            if (batchSize == algo.MBSizeForCurrentWorkspace) // Use stored algo when batchsize go back to max. Likely happen when last batch in epoch lacking data
+            {
+                algo.selectedAlgo = algo.maxAlgo;
+                algo.autotuningState = AutotuningState::Running;
+                algo.RecordBatchSizeAndWorkspaceSize(batchSize, workspace.BufferSize());
+            }
+            else    // use fast/static method to get algorithm when batchsize get smaller, assuming workspace size doesn't expand. Avoid severe slowdown when batchsize change frequently
+            {
+                CUDNN_CALL(staticFinder(algo.selectedAlgo, /*noMem*/false));
+                algo.autotuningState = AutotuningState::Running;
+                algo.RecordBatchSizeAndWorkspaceSize(batchSize, workspace.BufferSize());
+            }
         }
         return;
     }
@@ -628,6 +639,18 @@ private:
         decltype(T::algo) selectedAlgo;     // currently selected algorithm 
         decltype(T::algo) maxAlgo;          // algorithm that was selected when the current workspace is allocated 
 
+        void Reset()
+        {
+            AlgoRequiredWorkspaceSize = 0;
+            AlgoInUseWorkspaceSize = 0;
+            MBSizeForCurrentAlgo = 0;
+            MBSizeForCurrentWorkspace = 0;
+            AlgoRequiredWorkspaceSize = 0;
+            AlgoInUseWorkspaceSize = 0;
+            DeterministicAlgoRequiredWorkspaceSize = 0;
+            autotuningState = AutotuningState::Init;
+        }
+
         bool NeedAutotuning(size_t batchSize, size_t workspaceSize)
         {
             // NVIDIA:
@@ -637,22 +660,30 @@ private:
             // Should remain reasonable performance when minibatch size changes frequently (e.g. distributed reading).
             return (autotuningState != AutotuningState::Running ||
                     batchSize != MBSizeForCurrentAlgo ||
-                    workspaceSize < AlgoInUseWorkspaceSize);
+                    workspaceSize < AlgoRequiredWorkspaceSize);
         }
 
-        void RecordBatchSizeAndWorkspaceSize(size_t batchSize, bool newAlgo, size_t workspaceSize, bool skipWorkspaceSizeCheck=false)
+        void RecordBatchSizeAndWorkspaceSize(size_t batchSize, size_t workspaceSize, bool skipWorkspaceSizeCheck=false)
         {
-            if (newAlgo)
+            char msg[256];
+            sprintf_s(msg, "%p Record: state %d, batchSize %zu, workspaceSize %zu, required %zu, skipCheck %d\n", this, autotuningState, batchSize, workspaceSize, AlgoRequiredWorkspaceSize, skipWorkspaceSizeCheck);
+            OutputDebugStringA(msg);
+
+            if (selectedAlgo == maxAlgo)
             {
-                AlgoRequiredWorkspaceSize = workspaceSize;
                 MBSizeForCurrentWorkspace = batchSize;
             }
-            else if (AlgoRequiredWorkspaceSize > workspaceSize && !skipWorkspaceSizeCheck)
+
+            if (AlgoRequiredWorkspaceSize > workspaceSize && !skipWorkspaceSizeCheck)
             {
-                LogicError("CuDnnConvolutionEngine: Not enough workspace for selected algorithm.");
+                LogicError("CuDnnConvolutionEngine: Internal error, not enough workspace for selected algorithm.");
             }
 
-            AlgoInUseWorkspaceSize = workspaceSize;
+            if (AlgoRequiredWorkspaceSize > 0)
+                AlgoInUseWorkspaceSize = workspaceSize;
+            else
+                AlgoInUseWorkspaceSize = 0;
+
             MBSizeForCurrentAlgo = batchSize;
         }
     };
