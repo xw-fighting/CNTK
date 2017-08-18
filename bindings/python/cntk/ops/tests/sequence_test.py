@@ -148,8 +148,6 @@ def test_sequence_max():
   assert np.allclose(val, expected)
 
 
-
-
 def test_neg_sequence_max():
   np.random.seed(0)
   a = np.float32(-np.random.rand(20,100,8))

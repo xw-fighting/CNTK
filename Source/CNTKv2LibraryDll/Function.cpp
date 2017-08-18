@@ -2050,7 +2050,7 @@ namespace CNTK
         FunctionPtr ReduceElements(const Variable& operand, const std::wstring& reductionOpName, bool keepReducedDimensions, const std::wstring& name)
         {
             auto operandPlaceholder = PlaceholderVariable(L"operand");
-            auto unpackedSequence = Unpack(operandPlaceholder, ReductionIdentityValue(reductionOpName),  /*suppressMaskOutput =*/ true, name);
+            auto unpackedSequence = Unpack(operandPlaceholder, ReductionIdentityValue(reductionOpName), /*suppressMaskOutput =*/ true, name);
             auto reductionResult = Internal::ReduceElements(unpackedSequence, reductionOpName, Axis(-1), keepReducedDimensions);
 
             return AsBlock(std::move(reductionResult), { { operandPlaceholder, operand } }, L"Sequence::ReduceElements", name);
