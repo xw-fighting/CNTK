@@ -470,7 +470,7 @@ public:
             if (mapCount.size() > 1)
                 dimOut *= mapCount[i];
             else if (i == inputShape.GetRank() - 1)
-                dimOut = dimOutNoDilation*mapCount[0];
+                dimOut = (dil == 1) ? mapCount[0]:dimOutNoDilation*mapCount[0];
             dimsOutput[i] = dimOut;
         }
 

@@ -1686,9 +1686,9 @@ namespace CNTK
             strides,
             sharing,
             autoPadding,
-            dilation,
             false,
             { 0 },
+            dilation,
             maxTempMemSizeInSamples,
             name);
     }
@@ -1698,8 +1698,8 @@ namespace CNTK
         const NDShape& strides,
         const std::vector<bool>& sharing,
         const std::vector<bool>& autoPadding,
-        const NDShape& dilation,
         const NDShape& outputShape,
+        const NDShape& dilation,
         size_t maxTempMemSizeInSamples,
         const std::wstring& name)
     {
@@ -1708,9 +1708,9 @@ namespace CNTK
             strides,
             sharing,
             autoPadding,
-            dilation,
             true,
             outputShape,
+            dilation,
             maxTempMemSizeInSamples,
             name);
     }
@@ -2302,9 +2302,9 @@ namespace CNTK
             const NDShape& strides,
             const std::vector<bool>& sharing,
             const std::vector<bool>& autoPadding,
-            const NDShape& dilation,
             bool transpose,
             const NDShape& outputShape,
+            const NDShape& dilation,
             size_t maxTempMemSizeInSamples,
             const std::wstring& name)
         {
